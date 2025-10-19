@@ -1,0 +1,15 @@
+*.hier
+*.fst
+*.vcd
+*.bin
+*.rpt
+*.asc
+*.json
+*.yslog
+*.nplog
+
+*.swp
+
+tb_file
+.DS_Store
+obj_dir/
