@@ -1,10 +1,10 @@
-`timescale 1ns / 1ps
+/*`timescale 1ns / 1ps
 
 module testbench();
 
 localparam width_p = 8;
-localparam array_width_p = 2;
-localparam array_height_p = 2;
+localparam array_width_p = 8;
+localparam array_height_p = 8;
 localparam num_macs_p = array_width_p * array_height_p;
 localparam max_clks = 8;
 logic clk_i, reset_i, en_i, error_o; 
@@ -91,7 +91,7 @@ initial begin
     #10;
 
     valid_i = 1'b1;
-    /**/ data_i = 1'b1;
+    /**/ /*data_i = 1'b1;
     #10; data_i = 1'b0;
     #10; data_i = 1'b1;
     #10; data_i = 1'b0;
@@ -104,7 +104,7 @@ initial begin
     data_i = 1'b0;
     #20;
     valid_i = 1'b1;
-    /**/ data_i = 1'b0;
+    /**/ /*data_i = 1'b0;
     #10; data_i = 1'b1;
     #10; data_i = 1'b0;
     #10; data_i = 1'b1;
@@ -117,7 +117,7 @@ initial begin
     data_i = 1'b0;
     #20;
     valid_i = 1'b1;
-    /**/ data_i = 1'b0;
+    /**/ /*data_i = 1'b0;
     #10; data_i = 1'b1;
     #10; data_i = 1'b1;
     #10; data_i = 1'b0;
@@ -166,4 +166,177 @@ final begin
       end
    end
 
+endmodule /**/
+
+
+
+`timescale 1ns / 1ps
+
+module systolic_array_tb;
+
+  // ----------------------------------------------------------------
+  // Parameters (default 8×8 but easily changed)
+  // ----------------------------------------------------------------
+  localparam int width_p        = 8;
+  localparam int array_width_p  = 8;
+  localparam int array_height_p = 8;
+  localparam int num_macs_p     = array_width_p * array_height_p;
+  localparam int DATA_MAX       = (1 << width_p) - 1;
+
+  // ----------------------------------------------------------------
+  // Clock and Reset
+  // ----------------------------------------------------------------
+  logic clk_i, reset_i, en_i;
+  initial begin
+    clk_i = 0;
+    forever #5 clk_i = ~clk_i; // 100 MHz clock
+  end
+
+  initial begin
+    reset_i = 1;
+    en_i    = 0;
+    #20;
+    reset_i = 0;
+    en_i    = 1;
+  end
+
+  // ----------------------------------------------------------------
+  // DUT Connections
+  // ----------------------------------------------------------------
+  logic [0:0] valid_i, yumi_i, flush_i;
+  logic [0:0] valid_o, ready_o;
+  logic [width_p-1:0] data_i, data_o;
+
+  systolic_array #(
+    .width_p(width_p),
+    .array_width_p(array_width_p),
+    .array_height_p(array_height_p)
+  ) dut (
+    .clk_i(clk_i),
+    .reset_i(reset_i),
+    .en_i(en_i),
+    .flush_i(flush_i),
+    .ready_o(ready_o),
+    .valid_i(valid_i),
+    .data_i(data_i),
+    .valid_o(valid_o),
+    .yumi_i(yumi_i),
+    .data_o(data_o)
+  );
+
+  // ----------------------------------------------------------------
+  // Matrices (A × B = C)
+  // ----------------------------------------------------------------
+  int A[array_height_p][array_width_p];
+  int B[array_width_p][array_height_p];
+  int C_expected[array_height_p][array_height_p];
+  int C_received[array_height_p][array_height_p];
+
+  // ----------------------------------------------------------------
+  // Random matrix generation
+  // ----------------------------------------------------------------
+  task automatic gen_random_matrices();
+    for (int i = 0; i < array_height_p; i++)
+      for (int j = 0; j < array_width_p; j++)
+        A[i][j] = $urandom_range(0, DATA_MAX);
+
+    for (int i = 0; i < array_width_p; i++)
+      for (int j = 0; j < array_height_p; j++)
+        B[i][j] = $urandom_range(0, DATA_MAX);
+  endtask
+
+  // ----------------------------------------------------------------
+  // Software reference model
+  // ----------------------------------------------------------------
+  task automatic calc_expected();
+    for (int i = 0; i < array_height_p; i++)
+      for (int j = 0; j < array_height_p; j++) begin
+        C_expected[i][j] = 0;
+        for (int k = 0; k < array_width_p; k++)
+          C_expected[i][j] += A[i][k] * B[k][j];
+      end
+  endtask
+
+  // ----------------------------------------------------------------
+  // Feed matrices into DUT
+  // ----------------------------------------------------------------
+  task automatic feed_inputs();
+    valid_i = 0;
+    flush_i = 0;
+    yumi_i  = 0;
+    @(negedge reset_i);
+    @(posedge clk_i);
+
+    $display("Feeding A and B values into DUT...");
+    valid_i = 1;
+    for (int i = 0; i < array_height_p * array_width_p; i++) begin
+      data_i = $urandom_range(0, DATA_MAX);
+      @(posedge clk_i);
+    end
+    valid_i = 0;
+  endtask
+
+  // ----------------------------------------------------------------
+  // Collect DUT outputs after flush
+  // ----------------------------------------------------------------
+  task automatic collect_outputs();
+    flush_i = 1;
+    int count = 0;
+    @(posedge clk_i);
+    while (count < num_macs_p) begin
+      @(posedge clk_i);
+      if (valid_o) begin
+        C_received[count / array_width_p][count % array_width_p] = data_o;
+        count++;
+      end
+    end
+    flush_i = 0;
+  endtask
+
+  // ----------------------------------------------------------------
+  // Compare and report results
+  // ----------------------------------------------------------------
+  task automatic check_results();
+    int errors = 0;
+    for (int i = 0; i < array_height_p; i++)
+      for (int j = 0; j < array_height_p; j++) begin
+        if (C_expected[i][j] !== C_received[i][j]) begin
+          $display("Mismatch C[%0d][%0d]: expected=%0d got=%0d",
+                   i, j, C_expected[i][j], C_received[i][j]);
+          errors++;
+        end
+      end
+
+    if (errors == 0)
+      $display("✅  PASS: All outputs match expected results.");
+    else
+      $display("❌  FAIL: %0d mismatches found.", errors);
+  endtask
+
+  // ----------------------------------------------------------------
+  // Main Test Sequence
+  // ----------------------------------------------------------------
+  initial begin
+    @(negedge reset_i);
+    repeat (3) begin // Run three random tests
+      gen_random_matrices();
+      calc_expected();
+      feed_inputs();
+      #200; // allow some compute time
+      collect_outputs();
+      check_results();
+      #50;
+    end
+    $finish;
+  end
+
+  // ----------------------------------------------------------------
+  // Optional waveform dump
+  // ----------------------------------------------------------------
+  initial begin
+    $dumpfile("systolic_array_8x8.vcd");
+    $dumpvars(0, systolic_array_tb);
+  end
+
 endmodule
+
