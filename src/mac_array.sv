@@ -5,8 +5,8 @@
 module mac_array
 #(
 parameter width_p = 32
-,parameter array_width_p = 2
-,parameter array_height_p = 2
+,parameter array_width_p = 8
+,parameter array_height_p = 8
 )
 (input [0:0] clk_i
 ,input [0:0] reset_i
