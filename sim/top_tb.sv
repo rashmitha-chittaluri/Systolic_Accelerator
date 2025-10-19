@@ -308,9 +308,9 @@ module systolic_array_tb;
       end
 
     if (errors == 0)
-      $display("✅  PASS: All outputs match expected results.");
+      $display(" PASS: All outputs match expected results.");
     else
-      $display("❌  FAIL: %0d mismatches found.", errors);
+      $display(" FAIL: %0d mismatches found.", errors);
   endtask
 
   // ----------------------------------------------------------------
