@@ -35,6 +35,13 @@ module systolic_array_tb;
   logic ready_o, valid_o;
   logic [width_p-1:0] data_i, data_o;
 
+  // Extra DUT outputs
+  logic busy_o, idle_o;
+  logic [7:0] onehot_o;
+
+  // ================================================================
+  // DUT Instantiation
+  // ================================================================
   systolic_array #(
     .width_p(width_p),
     .array_width_p(array_width_p),
@@ -49,7 +56,10 @@ module systolic_array_tb;
     .data_i(data_i),
     .valid_o(valid_o),
     .yumi_i(yumi_i),
-    .data_o(data_o)
+    .data_o(data_o),
+    .busy_o(busy_o),
+    .idle_o(idle_o),
+    .onehot_o(onehot_o)
   );
 
   // ================================================================
@@ -68,6 +78,7 @@ module systolic_array_tb;
   int total_cycles;
   int output_count;
   int errors;
+  int min_size;
   realtime start_time, end_time;
   real throughput;
   real min_throughput = 0.50;
@@ -136,7 +147,6 @@ module systolic_array_tb;
     // ============================================================
     // Functional Check (simple 1-to-1 compare)
     // ============================================================
-    int min_size;
     if (golden_output.size() < received_output.size())
       min_size = golden_output.size();
     else
