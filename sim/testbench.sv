@@ -1,186 +1,198 @@
 `timescale 1ns / 1ps
 
-module testbench();
+module systolic_array_tb;
 
-localparam width_p = 8;
-localparam array_width_p = 2;
-localparam array_height_p = 2;
-localparam max_clks = 2 * array_width_p * array_height_p;
-logic clk_i, reset_i, en_i, error_o; 
-int i;
-logic [31:0] correct_z_w;
+  // ================================================================
+  // Parameters
+  // ================================================================
+  localparam int width_p        = 8;
+  localparam int array_width_p  = 8;
+  localparam int array_height_p = 8;
+  localparam int num_macs_p     = array_width_p * array_height_p;
+  localparam int MAX_VAL        = (1 << width_p) - 1;
 
-// Assume both arrays are the same size (and square for now)
-// Both are n x n
+  // ================================================================
+  // Clock and Reset
+  // ================================================================
+  logic clk_i, reset_i, en_i;
+  initial begin
+    clk_i = 0;
+    forever #5 clk_i = ~clk_i; // 100 MHz
+  end
 
-// For i in range(0, n)
-    // $readmemh("A.hex", ((i+1)*n)-1, i*n);
-    // $readmemh("B.hex", ((i+1)*n)-1, i*n);
-    // row_valid_i = 4'b1000;
-    // col_valid_i = 4'b1000;
-    // for j in range(0, max_clks)
-            // @(posedge clk_i);
-    // if (!(&z_valid_o)) $display("Timed out!"); $finish();
-    // 
+  initial begin
+    reset_i = 1;
+    en_i    = 0;
+    #25;
+    reset_i = 0;
+    en_i    = 1;
+  end
 
+  // ================================================================
+  // DUT Interface
+  // ================================================================
+  logic valid_i, yumi_i, flush_i;
+  logic ready_o, valid_o;
+  logic [width_p-1:0] data_i, data_o;
 
-nonsynth_clock_gen
- #(.cycle_time_p(10))
-cg
- (.clk_o(clk_i));
+  systolic_array #(
+    .width_p(width_p),
+    .array_width_p(array_width_p),
+    .array_height_p(array_height_p)
+  ) dut (
+    .clk_i(clk_i),
+    .reset_i(reset_i),
+    .en_i(en_i),
+    .flush_i(flush_i),
+    .ready_o(ready_o),
+    .valid_i(valid_i),
+    .data_i(data_i),
+    .valid_o(valid_o),
+    .yumi_i(yumi_i),
+    .data_o(data_o)
+  );
 
-nonsynth_reset_gen
- #(.num_clocks_p(1)
-  ,.reset_cycles_lo_p(1)
-  ,.reset_cycles_hi_p(10))
-rg
- (.clk_i(clk_i)
- ,.async_reset_o(reset_i));
+  // ================================================================
+  // Randomization Constraints
+  // ================================================================
+  typedef struct {
+    rand bit [width_p-1:0] value;
+    rand bit valid;
+    constraint c_valid {
+      valid dist {1 := 80, 0 := 20}; // 80% chance of sending data
+    }
+  } input_packet_t;
 
-logic [width_p-1:0] data_i, data_o, correct_data_o;
-logic [0:0] flush_i, ready_o, valid_i, valid_o, yumi_i;
- 
-assign en_i = 1'b1;
-assign error_o = (data_o != correct_data_o);
- 
-// DEBUG ONLY
-wire [0:0] throwaway_busy_w, throwaway_idle_w;
-wire [7:0] throwaway_onehot_w;
+  input_packet_t packet;
 
-systolic_array
-#(.width_p(width_p)
-,.array_width_p(array_width_p)
-,.array_height_p(array_height_p)
-)
-dut
-(.clk_i(clk_i)
-,.reset_i(reset_i)
-,.en_i(en_i)
-,.flush_i(flush_i)
-,.ready_o(ready_o)
-,.valid_i(valid_i)
-,.data_i(data_i)
-,.valid_o(valid_o)
-,.yumi_i(yumi_i)
-,.data_o(data_o)
-,.busy_o(throwaway_busy_w)
-,.idle_o(throwaway_idle_w)
-,.onehot_o(throwaway_onehot_w)
-);
+  // ================================================================
+  // Reference Model Variables
+  // ================================================================
+  int golden_output [$];     // dynamic array for expected outputs
+  int received_output [$];   // DUT outputs for comparison
 
-initial begin
-    `ifdef VERILATOR
-        $dumpfile("verilator.fst");
-    `else
-        $dumpfile("iverilog.vcd");
-    `endif
-        $dumpvars;
+  // ================================================================
+  // Throughput Measurement Variables
+  // ================================================================
+  int total_cycles;
+  int output_count;
+  realtime start_time, end_time;
+  real throughput;
+  real min_throughput = 0.50; // minimum acceptable throughput
 
-    $display("Begin test:");
-    $display();
-    #10;
-    correct_data_o = '0;
-    data_i = '0;
-    flush_i = 1'b0;
-    valid_i = 1'b0;
-    yumi_i = 1'b0;
+  // ================================================================
+  // Assertions
+  // ================================================================
+  // ready_o must assert within 3 cycles of valid_i
+  property ready_within_3;
+    @(posedge clk_i) disable iff (reset_i)
+      valid_i |-> ##[1:3] ready_o;
+  endproperty
+  assert_ready_within_3: assert property (ready_within_3)
+    else $error("ready_o did not assert within 3 cycles of valid_i");
 
+  // data_i must remain stable while ready_o is low
+  property data_stable_while_wait;
+    @(posedge clk_i) disable iff (reset_i)
+      (valid_i && !ready_o) |=> (data_i == $past(data_i));
+  endproperty
+  assert_data_stable_while_wait: assert property (data_stable_while_wait)
+    else $error("data_i changed while ready_o was low");
+
+  // valid_o should be followed by yumi_i within 3 cycles
+  property output_consumed;
+    @(posedge clk_i) disable iff (reset_i)
+      valid_o |-> ##[1:3] yumi_i;
+  endproperty
+  assert_output_consumed: assert property (output_consumed)
+    else $warning("Output not consumed quickly by yumi_i");
+
+  // ================================================================
+  // Stimulus and Measurement
+  // ================================================================
+  initial begin
     @(negedge reset_i);
-    #5; // re-align with posedge
-    
-    // Matrix indices are as follows:
-    // |0  1|
-    // |2  3|
-    // Systolic array consumer indices are as follows:
-    //    0  1
-    //  2 ╔═══╗
-    //    ║   ║
-    //  3 ╚═══╝
+    valid_i = 0;
+    flush_i = 0;
+    yumi_i  = 0;
+    data_i  = 0;
+    total_cycles = 0;
+    output_count = 0;
 
-    //         |1  2|
-    //         |3  4|
-    // |1  2|   █  █       |7  10|
-    // |3  4|   █  █  ---> |15 22|
+    // simple golden model: store all data_i values
+    golden_output.delete();
+    received_output.delete();
 
-    // Input cycle 1
-    valid_i = 1'b1;
-    data_i = 8'd3;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd4;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd2;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd4;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    valid_i = 1'b0;
-    #20;
+    start_time = $realtime;
 
-    @(posedge ready_o);
-    #10;
+    repeat (500) begin
+      void'(packet.randomize());
+      valid_i = packet.valid;
+      data_i  = packet.value;
 
-    // Input cycle 2
-    valid_i = 1'b1;
-    data_i = 8'd1;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd2;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd1;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd3;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    valid_i = 1'b0;
-    #20;
+      // generate a simple reference pattern (for demonstration)
+      if (valid_i)
+        golden_output.push_back(data_i); // expected sequence
 
-    @(posedge ready_o);
-    // For waveform only.
-    correct_z_w = {8'd22, 8'd15, 8'd10, 8'd7};
+      // output handshake
+      yumi_i = valid_o;
 
-    #20;
-    flush_i = 1'b1;
-    correct_data_o = 8'd7;
-    #10;
-    flush_i = 1'b0;
-    correct_data_o = 8'd10;
-    #10;
-    correct_data_o = 8'd15;
-    #10;
-    correct_data_o = 8'd22;
-    #10;
-    correct_data_o = '0;
-    #20;
+      @(posedge clk_i);
+      total_cycles++;
 
-    if (error_o) begin
-        $display("Error!");
-        $finish();
+      if (valid_o && yumi_i) begin
+        received_output.push_back(data_o);
+        output_count++;
+      end
     end
 
-    if (!error_o) $finish(); // Probably didn't error.
-    // Warning Verilator will reach this line and be okay, anything else will
-    // probably hang.
-    `ifndef VERILATOR
-        $display("Error: Hang after missing call to $finish()!");
-    `endif
-end
+    end_time = $realtime;
+    flush_i = 1;
+    repeat (5) @(posedge clk_i);
+    flush_i = 0;
 
-final begin
-      $display("Simulation time is %t", $time);
-      if(error_o) begin
-         $display("    ______                    ");
-         $display("   / ____/_____________  _____");
-         $display("  / __/ / ___/ ___/ __ \\/ ___/");
-         $display(" / /___/ /  / /  / /_/ / /    ");
-         $display("/_____/_/  /_/   \\____/_/     ");
-         $display();
-         $display("Simulation Failed");
-      end else begin
-         $display("    ____  ___   __________");
-         $display("   / __ \\/   | / ___/ ___/");
-         $display("  / /_/ / /| | \\__ \\\__  ");
-         $display(" / ____/ ___ |___/ /__/ / ");
-         $display("/_/   /_/  |_/____/____/  ");
-         $display();
-         $display("Simulation Succeeded!");
+    throughput = (output_count * 1.0) / total_cycles;
+    $display("----------------------------------------------------------");
+    $display("Total cycles       : %0d", total_cycles);
+    $display("Total outputs      : %0d", output_count);
+    $display("Throughput (out/clk): %0.3f", throughput);
+    $display("----------------------------------------------------------");
+
+    // ============================================================
+    // Functional Comparison
+    // ============================================================
+    int errors = 0;
+    int min_size = (golden_output.size() < received_output.size()) ?
+                   golden_output.size() : received_output.size();
+    for (int i = 0; i < min_size; i++) begin
+      if (received_output[i] !== golden_output[i]) begin
+        $display("Mismatch at output[%0d]: expected=%0d got=%0d",
+                  i, golden_output[i], received_output[i]);
+        errors++;
       end
-   end
+    end
+
+    // ============================================================
+    // Pass/Fail Logic
+    // ============================================================
+    if ((errors == 0) && (throughput >= min_throughput))
+      $display("PASS: No mismatches and throughput %.3f >= %.3f",
+               throughput, min_throughput);
+    else if (errors == 0)
+      $display("FAIL: Throughput %.3f below threshold %.3f",
+               throughput, min_throughput);
+    else
+      $display("FAIL: %0d mismatches detected", errors);
+
+    $finish;
+  end
+
+  // ================================================================
+  // Waveform
+  // ================================================================
+  initial begin
+    $dumpfile("systolic_array_throughput.vcd");
+    $dumpvars(0, systolic_array_tb);
+  end
 
 endmodule
