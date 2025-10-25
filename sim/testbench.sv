@@ -158,7 +158,7 @@ final begin
 
 
 // ======================================================
-// Added Throughput Measurement Block (Non-Intrusive)
+// Added Throughput Measurement Block (Fixed for Verilator)
 // ======================================================
 
   real CLK_PERIOD_NS = 10.0;       // 100 MHz clock
@@ -185,16 +185,15 @@ final begin
       output_count <= output_count + 1;
   end
 
-  // Capture start and end times and compute throughput
+  // Capture start and stop time
   initial begin
     @(negedge reset_i);
     start_time = $time;
+  end
 
-    // Wait until simulation ends
-    wait($finished == 1); // pseudo wait; simulation ends via $finish
-
+  // Print throughput report automatically when simulation ends
+  final begin
     end_time = $time;
-
     throughput_ops_per_cycle = (output_count * 1.0) / (cycle_count * 1.0);
     throughput_ops_per_sec   = (output_count * 1.0) / ((end_time - start_time) * 1e-9);
 
@@ -210,5 +209,4 @@ final begin
     $display(" Throughput (Mops/sec):   %.2f", throughput_ops_per_sec / 1e6);
     $display("=====================================\n");
   end
-
 endmodule
