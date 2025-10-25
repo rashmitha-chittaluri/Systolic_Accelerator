@@ -13,17 +13,6 @@ logic [31:0] correct_z_w;
 // Assume both arrays are the same size (and square for now)
 // Both are n x n
 
-// For i in range(0, n)
-    // $readmemh("A.hex", ((i+1)*n)-1, i*n);
-    // $readmemh("B.hex", ((i+1)*n)-1, i*n);
-    // row_valid_i = 4'b1000;
-    // col_valid_i = 4'b1000;
-    // for j in range(0, max_clks)
-            // @(posedge clk_i);
-    // if (!(&z_valid_o)) $display("Timed out!"); $finish();
-    // 
-
-
 nonsynth_clock_gen
  #(.cycle_time_p(10))
 cg
@@ -88,20 +77,6 @@ initial begin
     @(negedge reset_i);
     #5; // re-align with posedge
     
-    // Matrix indices are as follows:
-    // |0  1|
-    // |2  3|
-    // Systolic array consumer indices are as follows:
-    //    0  1
-    //  2 ╔═══╗
-    //    ║   ║
-    //  3 ╚═══╝
-
-    //         |1  2|
-    //         |3  4|
-    // |1  2|   █  █       |7  10|
-    // |3  4|   █  █  ---> |15 22|
-
     // Input cycle 1
     valid_i = 1'b1;
     data_i = 8'd3;
@@ -155,8 +130,6 @@ initial begin
     end
 
     if (!error_o) $finish(); // Probably didn't error.
-    // Warning Verilator will reach this line and be okay, anything else will
-    // probably hang.
     `ifndef VERILATOR
         $display("Error: Hang after missing call to $finish()!");
     `endif
@@ -175,12 +148,67 @@ final begin
       end else begin
          $display("    ____  ___   __________");
          $display("   / __ \\/   | / ___/ ___/");
-         $display("  / /_/ / /| | \\__ \\\__  ");
+         $display("  / /_/ / /| | \\__ \\__  ");
          $display(" / ____/ ___ |___/ /__/ / ");
          $display("/_/   /_/  |_/____/____/  ");
          $display();
          $display("Simulation Succeeded!");
       end
    end
+
+
+// ======================================================
+// Added Throughput Measurement Block (Non-Intrusive)
+// ======================================================
+
+  real CLK_PERIOD_NS = 10.0;       // 100 MHz clock
+  integer cycle_count = 0;         // total simulation cycles
+  integer input_count = 0;         // total valid inputs given
+  integer output_count = 0;        // total valid outputs received
+  time start_time, end_time;       // timestamps
+  real throughput_ops_per_cycle;
+  real throughput_ops_per_sec;
+
+  // Count total cycles
+  always @(posedge clk_i) begin
+    if (reset_i)
+      cycle_count <= 0;
+    else
+      cycle_count <= cycle_count + 1;
+  end
+
+  // Count input and output valid pulses
+  always @(posedge clk_i) begin
+    if (!reset_i && valid_i)
+      input_count <= input_count + 1;
+    if (!reset_i && valid_o)
+      output_count <= output_count + 1;
+  end
+
+  // Capture start and end times and compute throughput
+  initial begin
+    @(negedge reset_i);
+    start_time = $time;
+
+    // Wait until simulation ends
+    wait($finished == 1); // pseudo wait; simulation ends via $finish
+
+    end_time = $time;
+
+    throughput_ops_per_cycle = (output_count * 1.0) / (cycle_count * 1.0);
+    throughput_ops_per_sec   = (output_count * 1.0) / ((end_time - start_time) * 1e-9);
+
+    $display("\n=====================================");
+    $display("          THROUGHPUT REPORT");
+    $display("=====================================");
+    $display(" Clock Period (ns):       %.2f", CLK_PERIOD_NS);
+    $display(" Total Cycles:            %0d", cycle_count);
+    $display(" Valid Inputs:            %0d", input_count);
+    $display(" Valid Outputs:           %0d", output_count);
+    $display(" Simulation Time (ns):    %.2f", ($realtime - start_time));
+    $display(" Throughput (ops/cycle):  %.4f", throughput_ops_per_cycle);
+    $display(" Throughput (Mops/sec):   %.2f", throughput_ops_per_sec / 1e6);
+    $display("=====================================\n");
+  end
 
 endmodule
