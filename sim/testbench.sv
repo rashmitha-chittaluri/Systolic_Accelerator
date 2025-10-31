@@ -45,10 +45,6 @@ module testbench();
   wire [0:0] throwaway_busy_w, throwaway_idle_w;
   wire [7:0] throwaway_onehot_w;
 
-  // 8x8 systolic array → 64 valid/yumi lines
-  logic [63:0] z_valid_throwaway_w;
-  logic [63:0] z_yumi_throwaway_w;
-
   // ======================================================
   // DUT INSTANTIATION
   // ======================================================
@@ -71,8 +67,6 @@ module testbench();
   ,.busy_o(throwaway_busy_w)
   ,.idle_o(throwaway_idle_w)
   ,.onehot_o(throwaway_onehot_w)
-  ,.z_valid_o(z_valid_throwaway_w)
-  ,.z_yumi_i(z_yumi_throwaway_w)
   );
 
   // ======================================================
@@ -87,7 +81,7 @@ module testbench();
       $dumpvars;
 
     $display("=====================================");
-    $display("        BEGIN 8x8 TESTBENCH");
+    $display("         BEGIN 8x8 TESTBENCH");
     $display("=====================================");
 
     #10;
@@ -98,27 +92,32 @@ module testbench();
     yumi_i  = 1'b0;
 
     @(negedge reset_i);
-    #5; // align with posedge
+    #5; // re-align with posedge
 
-    // For 8x8 array, provide input sequence
-    // (You can modify pattern below depending on your matrices)
+    // ======================================================
+    // INPUT SEQUENCE FOR 8x8 MATRIX (TOTAL 64 INPUTS)
+    // ======================================================
     repeat (64) begin
       valid_i = 1'b1;
-      data_i  = $urandom_range(1, 10);
+      data_i  = $urandom_range(1, 10);  // random 8-bit inputs
       #10;
       valid_i = 1'b0;
       #10;
     end
 
-    // Wait for completion
-    #200;
+    @(posedge ready_o);
+    #100;
+
+    // Trigger flush to output data
     flush_i = 1'b1;
     #10;
     flush_i = 1'b0;
+
+    // Wait for all outputs to drain
     #200;
 
     if (error_o) begin
-      $display("Error!");
+      $display("Error detected!");
       $finish();
     end
 
