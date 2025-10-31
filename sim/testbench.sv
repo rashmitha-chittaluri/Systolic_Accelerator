@@ -99,7 +99,7 @@ module testbench();
     // ======================================================
     repeat (64) begin
       valid_i = 1'b1;
-      data_i  = $urandom_range(1, 10);  // random 8-bit inputs
+      data_i  = $urandom_range(1, 10)[7:0];  // random 8-bit inputs
       #10;
       valid_i = 1'b0;
       #10;
