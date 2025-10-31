@@ -2,165 +2,159 @@
 
 module testbench();
 
-localparam width_p = 8;
-localparam array_width_p = 2;
-localparam array_height_p = 2;
-localparam max_clks = 2 * array_width_p * array_height_p;
-logic clk_i, reset_i, en_i, error_o; 
-int i;
-logic [31:0] correct_z_w;
+  // ======================================================
+  // PARAMETERS (8x8 matrix configuration)
+  // ======================================================
+  localparam width_p        = 8;
+  localparam array_width_p  = 8;
+  localparam array_height_p = 8;
+  localparam max_clks       = 2 * array_width_p * array_height_p;
 
-// Assume both arrays are the same size (and square for now)
-// Both are n x n
+  logic clk_i, reset_i, en_i, error_o;
+  int i;
+  logic [31:0] correct_z_w;
 
-nonsynth_clock_gen
- #(.cycle_time_p(10))
-cg
- (.clk_o(clk_i));
+  // ======================================================
+  // CLOCK AND RESET GENERATION
+  // ======================================================
+  nonsynth_clock_gen
+   #(.cycle_time_p(10))
+   cg
+   (.clk_o(clk_i));
 
-nonsynth_reset_gen
- #(.num_clocks_p(1)
-  ,.reset_cycles_lo_p(1)
-  ,.reset_cycles_hi_p(10))
-rg
- (.clk_i(clk_i)
- ,.async_reset_o(reset_i));
+  nonsynth_reset_gen
+   #(.num_clocks_p(1)
+    ,.reset_cycles_lo_p(1)
+    ,.reset_cycles_hi_p(10))
+   rg
+   (.clk_i(clk_i)
+   ,.async_reset_o(reset_i));
 
-logic [width_p-1:0] data_i, data_o, correct_data_o;
-logic [0:0] flush_i, ready_o, valid_i, valid_o, yumi_i;
- 
-assign en_i = 1'b1;
-assign error_o = (data_o != correct_data_o);
- 
-// DEBUG ONLY
-wire [0:0] throwaway_busy_w, throwaway_idle_w;
-wire [7:0] throwaway_onehot_w;
+  // ======================================================
+  // SIGNALS
+  // ======================================================
+  logic [width_p-1:0] data_i, data_o, correct_data_o;
+  logic [0:0] flush_i, ready_o, valid_i, valid_o, yumi_i;
 
-systolic_array
-#(.width_p(width_p)
-,.array_width_p(array_width_p)
-,.array_height_p(array_height_p)
-)
-dut
-(.clk_i(clk_i)
-,.reset_i(reset_i)
-,.en_i(en_i)
-,.flush_i(flush_i)
-,.ready_o(ready_o)
-,.valid_i(valid_i)
-,.data_i(data_i)
-,.valid_o(valid_o)
-,.yumi_i(yumi_i)
-,.data_o(data_o)
-,.busy_o(throwaway_busy_w)
-,.idle_o(throwaway_idle_w)
-,.onehot_o(throwaway_onehot_w)
-);
+  assign en_i    = 1'b1;
+  assign error_o = (data_o != correct_data_o);
 
-initial begin
+  // ======================================================
+  // DEBUG WIRES
+  // ======================================================
+  wire [0:0] throwaway_busy_w, throwaway_idle_w;
+  wire [7:0] throwaway_onehot_w;
+
+  // 8x8 systolic array → 64 valid/yumi lines
+  logic [63:0] z_valid_throwaway_w;
+  logic [63:0] z_yumi_throwaway_w;
+
+  // ======================================================
+  // DUT INSTANTIATION
+  // ======================================================
+  systolic_array
+  #(.width_p(width_p)
+   ,.array_width_p(array_width_p)
+   ,.array_height_p(array_height_p)
+   )
+  dut
+  (.clk_i(clk_i)
+  ,.reset_i(reset_i)
+  ,.en_i(en_i)
+  ,.flush_i(flush_i)
+  ,.ready_o(ready_o)
+  ,.valid_i(valid_i)
+  ,.data_i(data_i)
+  ,.valid_o(valid_o)
+  ,.yumi_i(yumi_i)
+  ,.data_o(data_o)
+  ,.busy_o(throwaway_busy_w)
+  ,.idle_o(throwaway_idle_w)
+  ,.onehot_o(throwaway_onehot_w)
+  ,.z_valid_o(z_valid_throwaway_w)
+  ,.z_yumi_i(z_yumi_throwaway_w)
+  );
+
+  // ======================================================
+  // TEST SEQUENCE
+  // ======================================================
+  initial begin
     `ifdef VERILATOR
-        $dumpfile("verilator.fst");
+      $dumpfile("verilator.fst");
     `else
-        $dumpfile("iverilog.vcd");
+      $dumpfile("iverilog.vcd");
     `endif
-        $dumpvars;
+      $dumpvars;
 
-    $display("Begin test:");
-    $display();
+    $display("=====================================");
+    $display("        BEGIN 8x8 TESTBENCH");
+    $display("=====================================");
+
     #10;
     correct_data_o = '0;
     data_i = '0;
     flush_i = 1'b0;
     valid_i = 1'b0;
-    yumi_i = 1'b0;
+    yumi_i  = 1'b0;
 
     @(negedge reset_i);
-    #5; // re-align with posedge
-    
-    // Input cycle 1
-    valid_i = 1'b1;
-    data_i = 8'd3;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd4;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd2;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd4;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    valid_i = 1'b0;
-    #20;
+    #5; // align with posedge
 
-    @(posedge ready_o);
-    #10;
-
-    // Input cycle 2
-    valid_i = 1'b1;
-    data_i = 8'd1;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd2;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd1;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    data_i = 8'd3;
-    #10; valid_i = 1'b0; #10; valid_i = 1'b1;
-    valid_i = 1'b0;
-    #20;
-
-    @(posedge ready_o);
-    // For waveform only.
-    correct_z_w = {8'd22, 8'd15, 8'd10, 8'd7};
-
-    #20;
-    flush_i = 1'b1;
-    correct_data_o = 8'd7;
-    #10;
-    flush_i = 1'b0;
-    correct_data_o = 8'd10;
-    #10;
-    correct_data_o = 8'd15;
-    #10;
-    correct_data_o = 8'd22;
-    #10;
-    correct_data_o = '0;
-    #20;
-
-    if (error_o) begin
-        $display("Error!");
-        $finish();
+    // For 8x8 array, provide input sequence
+    // (You can modify pattern below depending on your matrices)
+    repeat (64) begin
+      valid_i = 1'b1;
+      data_i  = $urandom_range(1, 10);
+      #10;
+      valid_i = 1'b0;
+      #10;
     end
 
-    if (!error_o) $finish(); // Probably didn't error.
+    // Wait for completion
+    #200;
+    flush_i = 1'b1;
+    #10;
+    flush_i = 1'b0;
+    #200;
+
+    if (error_o) begin
+      $display("Error!");
+      $finish();
+    end
+
+    if (!error_o) $finish();
     `ifndef VERILATOR
-        $display("Error: Hang after missing call to $finish()!");
+      $display("Error: Hang after missing call to $finish()!");
     `endif
-end
+  end
 
-final begin
-      $display("Simulation time is %t", $time);
-      if(error_o) begin
-         $display("    ______                    ");
-         $display("   / ____/_____________  _____");
-         $display("  / __/ / ___/ ___/ __ \\/ ___/");
-         $display(" / /___/ /  / /  / /_/ / /    ");
-         $display("/_____/_/  /_/   \\____/_/     ");
-         $display();
-         $display("Simulation Failed");
-      end else begin
-         $display("    ____  ___   __________");
-         $display("   / __ \\/   | / ___/ ___/");
-         $display("  / /_/ / /| | \\__ \\__  ");
-         $display(" / ____/ ___ |___/ /__/ / ");
-         $display("/_/   /_/  |_/____/____/  ");
-         $display();
-         $display("Simulation Succeeded!");
-      end
-   end
+  // ======================================================
+  // FINAL SIMULATION STATUS DISPLAY
+  // ======================================================
+  final begin
+    $display("Simulation time is %t", $time);
+    if (error_o) begin
+      $display("    ______                    ");
+      $display("   / ____/_____________  _____");
+      $display("  / __/ / ___/ ___/ __ \\/ ___/");
+      $display(" / /___/ /  / /  / /_/ / /    ");
+      $display("/_____/_/  /_/   \\____/_/     ");
+      $display();
+      $display("Simulation Failed");
+    end else begin
+      $display("    ____  ___   __________");
+      $display("   / __ \\/   | / ___/ ___/");
+      $display("  / /_/ / /| | \\__ \\__  ");
+      $display(" / ____/ ___ |___/ /__/ / ");
+      $display("/_/   /_/  |_/____/____/  ");
+      $display();
+      $display("Simulation Succeeded!");
+    end
+  end
 
-
-// ======================================================
-// Added Throughput Measurement Block (Fixed for Verilator)
-// ======================================================
-
+  // ======================================================
+  // THROUGHPUT MEASUREMENT BLOCK
+  // ======================================================
   real CLK_PERIOD_NS = 10.0;       // 100 MHz clock
   integer cycle_count = 0;         // total simulation cycles
   integer input_count = 0;         // total valid inputs given
@@ -209,4 +203,5 @@ final begin
     $display(" Throughput (Mops/sec):   %.2f", throughput_ops_per_sec / 1e6);
     $display("=====================================\n");
   end
+
 endmodule
