@@ -111,7 +111,7 @@ module systolic_array
   // MSB of onehot indicates all consumers have received a valid this input step.
   assign hottest_bit_w          = onehot_w[num_consumers_lp-1];
   assign all_consumers_ready_w  = (&row_ready_o & &col_ready_o);
-  assign flush_done_w           = (flush_count_w == (num_macs_lp-1));
+  assign flush_done_w           = (flush_count_w == $unsigned(num_macs_lp - 1));
   assign flush_array_w          = (state_r == F_DONE_S);
   assign reset_onehot_w         = ((state_r == IDLE_S) & valid_i);
 
@@ -176,7 +176,8 @@ module systolic_array
   // Emit one MAC result per FLUSH step: select word 'flush_count_w'
   logic [width_p-1:0] data_o_l;
   always_comb begin
-    if (flush_count_w < num_macs_lp)
+    if (flush_count_w < $unsigned(num_macs_lp))
+
       // variable part-select: pick the (flush_count_w)-th word of z_w
       data_o_l = z_w[(flush_count_w+1)*width_p-1 -: width_p];
     else
